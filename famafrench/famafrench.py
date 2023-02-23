@@ -185,6 +185,7 @@ class FamaFrench:
                     if exc.errno != errno.EEXIST:
                         raise
         self.pickled_dir = pickled_dir
+        self.cheat_list = []
 
 
     @utils.lru_cached_method(maxsize=32)
@@ -286,7 +287,7 @@ class FamaFrench:
             comp_sqlQuery : str
             """
             if wrds_update == 'daily':
-                compdb = 'compd.funda'
+                compdb = 'comp_na_daily_all.funda'
             elif wrds_update == 'monthly':
                 compdb = 'compm.funda'
             elif wrds_update == '':
@@ -445,7 +446,9 @@ class FamaFrench:
             #       To be consistent w/ summary statistics for characteristics provided by Ken French's online library,
             #       values for 'op' outside the 99th percentile are set to missing.
             dfcomp['op'] = np.where((dfcomp['op'] <= dfcomp['op'].quantile(0.99)), dfcomp['op'], np.nan)
-            dfcomp_list.extend(['op', 'revt', 'xp_allnan'])
+            dfcomp_list.append('op')
+            dfcomp_list.append('revt')
+            dfcomp_list.append('xp_allnan')
 
         if ('INV' in set(self.sortCharacsId).union(set(self.mainCharacsId))) or (utils.any_in(['RMW', 'CMA'], set(self.factorsId).union(set(self.factorsIdtemp)))):
             # Create "asset growth (i.e. investment)" - 'inv' following Fama and French (2015):
@@ -481,7 +484,8 @@ class FamaFrench:
             dfcomp['csho_adj'] = np.where(((dfcomp['csho'] * dfcomp['adjex_f']) > 0), (dfcomp['csho'] * dfcomp['adjex_f']), np.nan)
             dfcomp['owcap_adj'] = ((dfcomp['act'] - dfcomp['che']) - (dfcomp['lct'].fillna(0) - dfcomp['dlc'].fillna(0))) / dfcomp['csho_adj']
             dfcomp['d_owcap_adj'] = (dfcomp['owcap_adj'] - dfcomp.groupby(['gvkey'])['owcap_adj'].shift(1))
-            dfcomp_list.extend(['d_owcap_adj', 'csho_adj'])
+            dfcomp_list.append('d_owcap_adj')
+            dfcomp_list.append('csho_adj')
 
         if 'NI' in set(self.sortCharacsId).union(set(self.mainCharacsId)):
             # Create "net income shares" - 'ni' - following Fama and French (2015):
@@ -946,7 +950,7 @@ class FamaFrench:
 
             rf1m_sql = {'rf1mDiff': diff_sql,
                         'rf1mFreq': freq_sql,
-                        'rf1mDb': 'factors_' + freqTypeFull,
+                        'rf1mDb': 'ff.factors_' + freqTypeFull,
                         'rf1mDbStartDate': '\'' + start_date + '\'',
                         'rf1mDbEndDate': '\'' + end_date + '\''}
 
@@ -2391,6 +2395,8 @@ class FamaFrench:
         if self.factorsId != 'MKT-RF':
             self.getMEJune(freq, dt_start, dt_end)
         dfcomp, dfcomp_list = self.queryComp(dt_start, dt_end)
+        self.dfcomp = dfcomp
+        self.dfcomp_list = dfcomp_list
 
         ccm_sqlQuery = """
                         SELECT gvkey, lpermno as permno, linktype, linkprim, linkdt, linkenddt
@@ -2419,6 +2425,7 @@ class FamaFrench:
         # If 'linkenddt' is missing, then set to today's date, 'today'.
         dfccm['linkenddt'] = dfccm['linkenddt'].fillna(pd.to_datetime('today'))
         dfccm1 = dfcomp[['gvkey', 'datadate', 'count'] + dfcomp_list].merge(right=dfccm, how='left', on=['gvkey'])
+        self.dfccm1 = dfccm1
 
         if len(dfcomp_list) == 0:
             dfccm1.insert(dfccm1.columns.get_loc('count'), 'yearend', dfccm1['datadate'] + YearEnd(0))
@@ -2430,6 +2437,7 @@ class FamaFrench:
         # Set the CCM link date bounds.
         dfccm2 = dfccm1[(dfccm1['date'] >= dfccm1['linkdt']) & (dfccm1['date'] <= dfccm1['linkenddt'])]
         dfccm2 = dfccm2[['gvkey', 'permno', 'datadate', 'yearend', 'date', 'count'] + dfcomp_list]
+        self.dfccm2 = dfccm2
 
         # Link CRSP w/ Compustat.
         if self.factorsId != 'MKT-RF':
@@ -3227,6 +3235,7 @@ class FamaFrench:
                     sBool = sBool & (df4[ffcharac + '_port'] != '') & (~df4[ffcharac + '_port'].isnull())
                 df5 = df4[sBool]
                 df4, df5 = df4.drop(columns=['sBool']), df5.drop(columns=['sBool'])
+                self.cheat_list.append((df1, df2, df3, dfcrsp, df4, df5))
 
                 cols1 = ['date'] + [ffcharac + '_port' for ffcharac in ffcharac_list]
                 cols_port = '_'.join(ffcharac_list) + '_port'
